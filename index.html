@@ -175,10 +175,11 @@
                 poseModel = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
                     modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
                 });
+                console.log("Pose Model Loaded:", poseModel);
                 faceModel = await faceDetection.createDetector(faceDetection.SupportedModels.MediaPipeFaceDetector, {
                     runtime: 'mediapipe'
                 });
-                console.log("Face Model Loaded:", faceModel); // Added console log for debugging
+                console.log("Face Model Loaded:", faceModel);
             } catch (error) {
                 console.error("Error loading models:", error);
                 messageDiv.textContent = "Error loading detection models.";
@@ -204,7 +205,7 @@
         }
 
         async function detectAndAnalyze(currentVideo) {
-            if (poseModel && faceModel) { // Ensure both models are loaded
+            if (poseModel && faceModel) {
                 try {
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
                     const poses = await poseModel.estimatePoses(currentVideo, { flipHorizontal: true });
@@ -223,6 +224,8 @@
                 } catch (error) {
                     console.error("Error detecting and analyzing:", error);
                 }
+            } else {
+                console.log("Waiting for models to load...");
             }
             requestAnimationFrame(() => detectAndAnalyze(currentVideo));
         }
@@ -345,7 +348,7 @@
                 const stream = canvas.captureStream();
                 mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
                 mediaRecorder.ondataavailable = handleDataAvailable;
-                mediaRecorder.onstop = downloadVideo; // Download when recording stops
+                mediaRecorder.onstop = downloadVideo;
                 mediaRecorder.start();
                 captureButton.textContent = "Stop Recording";
                 recordingIndicator.style.display = 'block';
@@ -376,7 +379,7 @@
             a.click();
             document.body.removeChild(a);
             URL.revokeObjectURL(url);
-            recordedChunks = []; // Clear chunks after download
+            recordedChunks = [];
         }
 
         function captureCanvas(type) {
