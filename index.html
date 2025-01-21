@@ -147,243 +147,245 @@
         const ctx = canvas.getContext('2d');
         const webcamButton = document.getElementById('webcamButton');
         const fileInput = document.getElementById('fileInput');
-        const captureButton = document.getElementById('captureButton');
-         const messageDiv = document.getElementById('message');
+         const captureButton = document.getElementById('captureButton');
+        const messageDiv = document.getElementById('message');
         
         let poseModel;
         let faceModel;
-         let prevKeypoints = null;
+        let prevKeypoints = null;
         let prevFaceBoxes = [];
-        let prevAngles = {};
+         let prevAngles = {};
         const movementThreshold = 20;
-        const angleChangeThreshold = 15;  // 임계값을 조정해서 민감도를 변경할 수 있습니다.
-         const stayTimeThreshold = 5 * 1000; // 5 seconds
-        let startTime = {};
-        let mediaRecorder = null;
+         const angleChangeThreshold = 15;  // 임계값을 조정해서 민감도를 변경할 수 있습니다.
+        const stayTimeThreshold = 5 * 1000; // 5 seconds
+         let startTime = {};
+       let mediaRecorder = null;
         let recordedChunks = [];
-         let isRecording = false;
-        let recognizedFaces = []; // Store recognized faces
-        let captureCount = 0;
+        let isRecording = false;
+       let recognizedFaces = []; // Store recognized faces
+         let captureCount = 0;
     
          async function loadModels() {
-             try {
-                poseModel = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
-                    modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
-                });
-               faceModel = await faceDetection.createDetector(faceDetection.SupportedModels.MediaPipeFaceDetector);
+            try {
+              poseModel = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
+                modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
+            });
+              faceModel = await faceDetection.createDetector(faceDetection.SupportedModels.MediaPipeFaceDetector);
             }
-             catch(error) {
-               console.error("Error loading models:", error);
-           }
-        }
-        loadModels();
-    
-         function calculateAngle(a, b, c) {
-            if (!a || !b || !c) {
-               return 0;
+           catch(error) {
+             console.error("Error loading models:", error);
             }
-            const a_pos = {x: a.x, y:a.y};
-             const b_pos = {x: b.x, y:b.y};
-             const c_pos = {x: c.x, y:c.y};
-             const radians = Math.atan2(c_pos.y - b_pos.y, c_pos.x - b_pos.x) - Math.atan2(a_pos.y - b_pos.y, a_pos.x - b_pos.x);
-            let angle = Math.abs(radians * 180.0 / Math.PI);
-              if (angle > 180.0) {
-                angle = 360 - angle;
-             }
-             return angle;
          }
+       loadModels();
     
-        async function detectAndAnalyze(video) {
-           if (poseModel && faceModel) {
+      function calculateAngle(a, b, c) {
+        if (!a || !b || !c) {
+            return 0;
+         }
+        const a_pos = {x: a.x, y:a.y};
+          const b_pos = {x: b.x, y:b.y};
+           const c_pos = {x: c.x, y:c.y};
+           const radians = Math.atan2(c_pos.y - b_pos.y, c_pos.x - b_pos.x) - Math.atan2(a_pos.y - b_pos.y, a_pos.x - b_pos.x);
+           let angle = Math.abs(radians * 180.0 / Math.PI);
+             if (angle > 180.0) {
+               angle = 360 - angle;
+             }
+            return angle;
+        }
+    
+       async function detectAndAnalyze(video) {
+            if (poseModel && faceModel) {
                  try {
                    ctx.clearRect(0, 0, canvas.width, canvas.height);
                     const poses = await poseModel.estimatePoses(video, { flipHorizontal: true });
-                    const faces = await faceModel.estimateFaces(video);
+                     const faces = await faceModel.estimateFaces(video);
                                         
-                    if(poses && poses.length>0) {
-                       const pose = poses[0]; // Assume only one person in the frame
+                  if(poses && poses.length>0) {
+                      const pose = poses[0]; // Assume only one person in the frame
                         drawKeypoints(pose.keypoints);
-                       detectMovement(pose.keypoints);
-                         detectSuspiciousBehavior(pose.keypoints);
-                     }
+                      detectMovement(pose.keypoints);
+                        detectSuspiciousBehavior(pose.keypoints,poses);
+                 }
                   if(faces && faces.length>0) {
                         detectAndRecognizeFaces(faces);
-                       drawFaces(faces);
+                      drawFaces(faces);
                   }
                }
-                 catch (error) {
+               catch (error) {
                     console.error("Error detecting and analyzing:", error);
-                 }
-            }
-            requestAnimationFrame(()=>detectAndAnalyze(video));
+                }
+           }
+         requestAnimationFrame(()=>detectAndAnalyze(video));
         }
 
         function drawKeypoints(keypoints) {
             ctx.fillStyle = "white";
              for(let i=0; i < keypoints.length; i++) {
-               const keypoint = keypoints[i];
-               if(keypoint.score > 0.5){
+                const keypoint = keypoints[i];
+                 if(keypoint.score > 0.5){
                     ctx.beginPath();
-                   ctx.arc(keypoint.x, keypoint.y, 5, 0, 2*Math.PI);
-                    ctx.fill();
+                    ctx.arc(keypoint.x, keypoint.y, 5, 0, 2*Math.PI);
+                     ctx.fill();
                  }
-           }
+            }
         }
 
-         function detectMovement(keypoints) {
-             if(prevKeypoints) {
+        function detectMovement(keypoints) {
+           if(prevKeypoints) {
                 let totalMovement = 0;
                 for (let i = 0; i < keypoints.length; i++) {
-                     const prevKeypoint = prevKeypoints[i];
-                    const keypoint = keypoints[i];
+                    const prevKeypoint = prevKeypoints[i];
+                     const keypoint = keypoints[i];
                      if(prevKeypoint && keypoint && prevKeypoint.score > 0.5 && keypoint.score >0.5) {
                        totalMovement += Math.sqrt(Math.pow(keypoint.x-prevKeypoint.x,2) + Math.pow(keypoint.y - prevKeypoint.y,2))
                     }
                 }
-               if (totalMovement * canvas.width > movementThreshold) {
+                if (totalMovement * canvas.width > movementThreshold) {
                      messageDiv.textContent = "Movement Detected!";
-                   messageDiv.style.color = "red";
+                     messageDiv.style.color = "red";
                    console.log(f"Total movement: {totalMovement * canvas.width:.2f}");
-                    captureCanvas("movement");
-                }else {
+                   captureCanvas("movement");
+               } else {
                     messageDiv.textContent = "";
-                }
-           }
-           prevKeypoints = keypoints;
+               }
+          }
+          prevKeypoints = keypoints;
        }
 
-       function detectSuspiciousBehavior(keypoints) {
+         function detectSuspiciousBehavior(keypoints, poses) {
            const leftElbow = keypoints[7];
-           const leftShoulder = keypoints[5];
-            const leftWrist = keypoints[9];
-             const rightElbow = keypoints[8];
-            const rightShoulder = keypoints[6];
+            const leftShoulder = keypoints[5];
+             const leftWrist = keypoints[9];
+            const rightElbow = keypoints[8];
+             const rightShoulder = keypoints[6];
             const rightWrist = keypoints[10];
-
-           if(leftElbow && leftShoulder && leftWrist &&
-                 rightElbow && rightShoulder && rightWrist &&
-                 leftElbow.score > 0.5 && leftShoulder.score > 0.5 && leftWrist.score > 0.5 &&
-               rightElbow.score > 0.5 && rightShoulder.score > 0.5 && rightWrist.score > 0.5) {
-                  const newLeftArmAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
-                 const newRightArmAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
-
-                 if(prevAngles["leftArm"] !== undefined && Math.abs(newLeftArmAngle - prevAngles["leftArm"]) > angleChangeThreshold){
-                    messageDiv.textContent = "Suspicious arm movement detected";
-                    messageDiv.style.color = "orange";
-                   console.log("Suspicious arm movement detected");
-                    captureCanvas("suspicious_arm");
-                }
-                  if(prevAngles["rightArm"] !== undefined && Math.abs(newRightArmAngle - prevAngles["rightArm"]) > angleChangeThreshold){
-                     messageDiv.textContent = "Suspicious arm movement detected";
-                   messageDiv.style.color = "orange";
-                   console.log("Suspicious arm movement detected");
-                    captureCanvas("suspicious_arm");
-                 }
-                 prevAngles["leftArm"] = newLeftArmAngle;
-                 prevAngles["rightArm"] = newRightArmAngle;
+          
+            if(leftElbow && leftShoulder && leftWrist &&
+                rightElbow && rightShoulder && rightWrist &&
+                leftElbow.score > 0.5 && leftShoulder.score > 0.5 && leftWrist.score > 0.5 &&
+                rightElbow.score > 0.5 && rightShoulder.score > 0.5 && rightWrist.score > 0.5) {
+                    const newLeftArmAngle = calculateAngle(leftShoulder, leftElbow, leftWrist);
+                   const newRightArmAngle = calculateAngle(rightShoulder, rightElbow, rightWrist);
+                   
+                    if(prevAngles["leftArm"] !== undefined && Math.abs(newLeftArmAngle - prevAngles["leftArm"]) > angleChangeThreshold){
+                       messageDiv.textContent = "Suspicious arm movement detected";
+                        messageDiv.style.color = "orange";
+                         console.log("Suspicious arm movement detected");
+                         captureCanvas("suspicious_arm");
+                    }
+                   if(prevAngles["rightArm"] !== undefined && Math.abs(newRightArmAngle - prevAngles["rightArm"]) > angleChangeThreshold){
+                       messageDiv.textContent = "Suspicious arm movement detected";
+                        messageDiv.style.color = "orange";
+                       console.log("Suspicious arm movement detected");
+                         captureCanvas("suspicious_arm");
+                    }
+                   prevAngles["leftArm"] = newLeftArmAngle;
+                    prevAngles["rightArm"] = newRightArmAngle;
            }
         }
 
-        function drawFaces(faces) {
-             ctx.strokeStyle = "red";
-            for (const face of faces) {
-                 const box = face.box;
-              ctx.strokeRect(box.x, box.y, box.width, box.height);
-            }
-         }
+         function drawFaces(faces) {
+            ctx.strokeStyle = "red";
+           for (const face of faces) {
+               const box = face.box;
+                 ctx.strokeRect(box.x, box.y, box.width, box.height);
+          }
+        }
 
         function detectAndRecognizeFaces(faces) {
-           for(let face of faces) {
-               const box = face.box;
+            for(let face of faces) {
+              const box = face.box;
                 const faceId = `${box.x}_${box.y}_${box.width}_${box.height}`;
-               let faceFound = recognizedFaces.find(x=>x.faceId == faceId)
-               if (!faceFound) {
+              let faceFound = recognizedFaces.find(x=>x.faceId == faceId)
+                if (!faceFound) {
                     recognizedFaces.push({faceId:faceId,time: new Date().toLocaleString()});
                      messageDiv.textContent = `New face detected at ${ new Date().toLocaleString()}`;
-                   messageDiv.style.color = "blue";
+                     messageDiv.style.color = "blue";
                    console.log(`New face detected at ${ new Date().toLocaleString()}`);
-                    captureCanvas("face");
-                }
+                     captureCanvas("face");
+                 }
            }
         }
 
-         async function startWebcam() {
-            try {
+
+        async function startWebcam() {
+             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: true });
                 video.srcObject = stream;
-                video.onloadedmetadata = () => {
+                 video.onloadedmetadata = () => {
                    video.play();
                    detectAndAnalyze(video);
                 }
            } catch (error) {
                 console.error("Error accessing webcam:", error);
-           }
-       }
-
+             }
+        }
+   
        function handleFile(event) {
             const file = event.target.files[0];
-            if (file) {
+             if (file) {
                video.src = URL.createObjectURL(file);
-                 video.onloadedmetadata = () => {
-                   video.play();
-                  detectAndAnalyze(video);
-                 }
-            }
-      }
-
-        async function startRecording() {
-          if (!isRecording) {
-              recordedChunks = [];
-                const stream = canvas.captureStream(30);
-                 mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
-                mediaRecorder.ondataavailable = handleDataAvailable;
-                mediaRecorder.start();
-                captureButton.textContent = "Stop Recording";
-                isRecording = true;
-            } else {
-              mediaRecorder.stop();
-              captureButton.textContent = "Start Recording";
-               isRecording = false;
+                  video.onloadedmetadata = () => {
+                       video.play();
+                    detectAndAnalyze(video);
+                  }
             }
         }
-    
-        function handleDataAvailable(event){
-           if (event.data && event.data.size >0 ) {
+
+
+        async function startRecording() {
+           if (!isRecording) {
+                 recordedChunks = [];
+                const stream = canvas.captureStream(30);
+               mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+               mediaRecorder.ondataavailable = handleDataAvailable;
+                mediaRecorder.start();
+                captureButton.textContent = "Stop Recording";
+                 isRecording = true;
+           } else {
+                 mediaRecorder.stop();
+                 captureButton.textContent = "Start Recording";
+                 isRecording = false;
+            }
+        }
+
+       function handleDataAvailable(event){
+            if (event.data && event.data.size >0 ) {
                 recordedChunks.push(event.data);
-                downloadVideo();
-           }
+               downloadVideo();
+            }
         }
 
          function downloadVideo() {
-           const blob = new Blob(recordedChunks, { type: "video/webm" });
-           const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-             a.href = url;
-             a.download = 'captured.webm';
-             a.style.display = 'none';
-            document.body.appendChild(a);
-            a.click();
-           document.body.removeChild(a);
+            const blob = new Blob(recordedChunks, { type: "video/webm" });
+            const url = URL.createObjectURL(blob);
+           const a = document.createElement('a');
+            a.href = url;
+            a.download = 'captured.webm';
+              a.style.display = 'none';
+           document.body.appendChild(a);
+             a.click();
+              document.body.removeChild(a);
             URL.revokeObjectURL(url);
-           recordedChunks = [];
-        }
-     
+            recordedChunks = [];
+       }
+    
         function captureCanvas(type){
-             const image = canvas.toDataURL("image/png");
-             const a = document.createElement('a');
-              a.href = image;
+          const image = canvas.toDataURL("image/png");
+            const a = document.createElement('a');
+            a.href = image;
              a.download = `captured_${type}_${captureCount}.png`;
-             a.style.display = 'none';
-            document.body.appendChild(a);
+            a.style.display = 'none';
+           document.body.appendChild(a);
             a.click();
-            document.body.removeChild(a);
-             captureCount++;
-        }
+             document.body.removeChild(a);
+            captureCount++;
+         }
 
-         startWebcam();
-       webcamButton.addEventListener('click', startWebcam);
-       fileInput.addEventListener('change', handleFile);
-         captureButton.addEventListener('click', startRecording);
+       startWebcam();
+        webcamButton.addEventListener('click', startWebcam);
+        fileInput.addEventListener('change', handleFile);
+        captureButton.addEventListener('click', startRecording);
 
     </script>
 </body>
