@@ -72,7 +72,7 @@
         const ctx = canvas.getContext('2d');
         const webcamButton = document.getElementById('webcamButton');
         const fileInput = document.getElementById('fileInput');
-         const captureButton = document.getElementById('captureButton');
+        const captureButton = document.getElementById('captureButton');
         const messageDiv = document.getElementById('message');
 
         let poseModel;
@@ -84,6 +84,7 @@
         let recordedChunks = [];
         let isRecording = false;
         let recognizedFaces = []; // Store recognized faces
+        let captureCount = 0;
 
 
         async function loadModels() {
@@ -94,7 +95,6 @@
         }
         loadModels();
 
-
         async function detectAndAnalyze(video) {
             if (poseModel && faceModel) {
                  try {
@@ -103,15 +103,15 @@
                     const poses = await poseModel.estimatePoses(video, { flipHorizontal: true });
                     const faces = await faceModel.estimateFaces(video);
                                         
-                     if(poses && poses.length>0) {
+                    if(poses && poses.length>0) {
                          const pose = poses[0]; // Assume only one person in the frame
-                         drawKeypoints(pose.keypoints);
+                        drawKeypoints(pose.keypoints);
                          detectMovement(pose.keypoints);
                    
                      }
                   
-                  if(faces && faces.length>0) {
-                      detectAndRecognizeFaces(faces);
+                    if(faces && faces.length>0) {
+                       detectAndRecognizeFaces(faces);
                        drawFaces(faces);
                   }
                 }
@@ -121,7 +121,6 @@
             }
            requestAnimationFrame(()=>detectAndAnalyze(video));
         }
-
 
         function drawKeypoints(keypoints) {
              ctx.fillStyle = "white";
@@ -148,7 +147,8 @@
                 if (totalMovement * canvas.width > movementThreshold) {
                     messageDiv.textContent = "Movement Detected!";
                     messageDiv.style.color = "red";
-                   console.log(f"Total movement: {totalMovement * canvas.width:.2f}");
+                    console.log(f"Total movement: {totalMovement * canvas.width:.2f}");
+                     captureCanvas("movement")
                 }else {
                     messageDiv.textContent = "";
                 }
@@ -170,11 +170,12 @@
               const faceId = `${box.x}_${box.y}_${box.width}_${box.height}`; // generate unique id based on box
                 let faceFound = recognizedFaces.find(x=>x.faceId == faceId)
                  if (!faceFound) {
-                    recognizedFaces.push({faceId:faceId,time: new Date().toLocaleString()});
-                     messageDiv.textContent = `New face detected at ${ new Date().toLocaleString()}`;
-                     messageDiv.style.color = "blue";
-                    console.log(`New face detected at ${ new Date().toLocaleString()}`);
-                }
+                     recognizedFaces.push({faceId:faceId,time: new Date().toLocaleString()});
+                    messageDiv.textContent = `New face detected at ${ new Date().toLocaleString()}`;
+                    messageDiv.style.color = "blue";
+                   console.log(`New face detected at ${ new Date().toLocaleString()}`);
+                   captureCanvas("face");
+               }
               
             }
         }
@@ -183,29 +184,27 @@
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: true });
                 video.srcObject = stream;
-               video.onloadedmetadata = () => {
+                video.onloadedmetadata = () => {
                    video.play();
                   detectAndAnalyze(video);
                 }
-               
             } catch (error) {
                 console.error("Error accessing webcam:", error);
             }
         }
 
-        function handleFile(event) {
-               const file = event.target.files[0];
-                if (file) {
+      function handleFile(event) {
+           const file = event.target.files[0];
+            if (file) {
                   video.src = URL.createObjectURL(file);
-                  video.onloadedmetadata = () => {
-                   video.play();
-                  detectAndAnalyze(video);
-                }
-
+                   video.onloadedmetadata = () => {
+                       video.play();
+                   detectAndAnalyze(video);
+                   }
                  }
         }
-
-        async function startRecording() {
+    
+         async function startRecording() {
              if (!isRecording) {
                  recordedChunks = [];
                 const stream = canvas.captureStream(30);
@@ -220,29 +219,44 @@
                 isRecording = false;
             }
         }
-        function handleDataAvailable(event){
+         function handleDataAvailable(event){
             if (event.data && event.data.size >0 ) {
-               recordedChunks.push(event.data);
+                recordedChunks.push(event.data);
                 downloadVideo();
-            }
+           }
         }
-         function downloadVideo() {
-                const blob = new Blob(recordedChunks, { type: "video/webm" });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = 'captured.webm';
-                a.style.display = 'none';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
-                recordedChunks = [];
+
+        function downloadVideo() {
+            const blob = new Blob(recordedChunks, { type: "video/webm" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'captured.webm';
+             a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+             recordedChunks = [];
         }
+     
     
+       function captureCanvas(type){
+            const image = canvas.toDataURL("image/png");
+             const a = document.createElement('a');
+             a.href = image;
+            a.download = `captured_${type}_${captureCount}.png`;
+             a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+           captureCount++;
+       }
+
         webcamButton.addEventListener('click', startWebcam);
         fileInput.addEventListener('change', handleFile);
-        captureButton.addEventListener('click', startRecording);
+       captureButton.addEventListener('click', startRecording);
+
     </script>
 </body>
 </html>
