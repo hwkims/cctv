@@ -175,7 +175,9 @@
                 poseModel = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
                     modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
                 });
-                faceModel = await faceDetection.createDetector(faceDetection.SupportedModels.MediaPipeFaceDetector);
+                faceModel = await faceDetection.createDetector(faceDetection.SupportedModels.MediaPipeFaceDetector, {
+                    runtime: 'mediapipe'
+                });
             } catch (error) {
                 console.error("Error loading models:", error);
                 messageDiv.textContent = "Error loading detection models.";
