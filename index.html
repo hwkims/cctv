@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web-Based Intruder Detection</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+        }
+        #video-container {
+           position: relative;
+        }
+        #canvas {
+           position: absolute;
+            top:0;
+            left:0;
+        }
+        #video {
+           display: block;
+           border:1px solid black;
+           width: 640px;
+           height: 480px;
+        }
+       
+        #controls {
+            margin-top: 20px;
+            text-align: center;
+        }
+        button, input[type="file"] {
+            padding: 10px;
+            margin: 5px;
+            cursor: pointer;
+        }
+         #message {
+          margin-top: 10px;
+          text-align:center;
+        }
+        #captureButton {
+            display: block;
+            margin: 20px auto;
+        }
+    </style>
+     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/face-detection"></script>
+</head>
+<body>
+    <h1>Real-time Intruder Detection System</h1>
+   <div id="video-container">
+      <video id="video" autoplay muted></video>
+      <canvas id="canvas" width="640" height="480"></canvas>
+    </div>
+
+    <div id="controls">
+        <button id="webcamButton">Start Webcam</button>
+        <span> 또는 </span>
+        <input type="file" id="fileInput" accept="video/*">
+       <button id="captureButton">Start Recording</button>
+    </div>
+    <div id="message"></div>
+   <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const webcamButton = document.getElementById('webcamButton');
+        const fileInput = document.getElementById('fileInput');
+         const captureButton = document.getElementById('captureButton');
+        const messageDiv = document.getElementById('message');
+
+        let poseModel;
+        let faceModel;
+        let prevKeypoints = null;
+        let prevFaceBoxes = [];
+        const movementThreshold = 20;
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let isRecording = false;
+        let recognizedFaces = []; // Store recognized faces
+
+
+        async function loadModels() {
+            poseModel = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
+                modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
+            });
+            faceModel = await faceDetection.createDetector(faceDetection.SupportedModels.MediaPipeFaceDetector);
+        }
+        loadModels();
+
+
+        async function detectAndAnalyze(video) {
+            if (poseModel && faceModel) {
+                 try {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                     
+                    const poses = await poseModel.estimatePoses(video, { flipHorizontal: true });
+                    const faces = await faceModel.estimateFaces(video);
+                                        
+                     if(poses && poses.length>0) {
+                         const pose = poses[0]; // Assume only one person in the frame
+                         drawKeypoints(pose.keypoints);
+                         detectMovement(pose.keypoints);
+                   
+                     }
+                  
+                  if(faces && faces.length>0) {
+                      detectAndRecognizeFaces(faces);
+                       drawFaces(faces);
+                  }
+                }
+                catch (error) {
+                    console.error("Error detecting pose:", error);
+                }
+            }
+           requestAnimationFrame(()=>detectAndAnalyze(video));
+        }
+
+
+        function drawKeypoints(keypoints) {
+             ctx.fillStyle = "white";
+             for(let i=0; i < keypoints.length; i++) {
+                const keypoint = keypoints[i];
+                  if(keypoint.score > 0.5){
+                     ctx.beginPath();
+                     ctx.arc(keypoint.x, keypoint.y, 5, 0, 2*Math.PI);
+                     ctx.fill();
+                 }
+            }
+        }
+
+        function detectMovement(keypoints) {
+          if(prevKeypoints) {
+               let totalMovement = 0;
+                for (let i = 0; i < keypoints.length; i++) {
+                   const prevKeypoint = prevKeypoints[i];
+                   const keypoint = keypoints[i];
+                    if(prevKeypoint && keypoint && prevKeypoint.score > 0.5 && keypoint.score >0.5) {
+                          totalMovement += Math.sqrt(Math.pow(keypoint.x-prevKeypoint.x,2) + Math.pow(keypoint.y - prevKeypoint.y,2))
+                   }
+               }
+                if (totalMovement * canvas.width > movementThreshold) {
+                    messageDiv.textContent = "Movement Detected!";
+                    messageDiv.style.color = "red";
+                   console.log(f"Total movement: {totalMovement * canvas.width:.2f}");
+                }else {
+                    messageDiv.textContent = "";
+                }
+            }
+            prevKeypoints = keypoints;
+        }
+       
+       function drawFaces(faces) {
+          ctx.strokeStyle = "red";
+           for (const face of faces) {
+             const box = face.box;
+             ctx.strokeRect(box.x, box.y, box.width, box.height);
+           }
+       }
+
+        function detectAndRecognizeFaces(faces) {
+            for(let face of faces) {
+              const box = face.box;
+              const faceId = `${box.x}_${box.y}_${box.width}_${box.height}`; // generate unique id based on box
+                let faceFound = recognizedFaces.find(x=>x.faceId == faceId)
+                 if (!faceFound) {
+                    recognizedFaces.push({faceId:faceId,time: new Date().toLocaleString()});
+                     messageDiv.textContent = `New face detected at ${ new Date().toLocaleString()}`;
+                     messageDiv.style.color = "blue";
+                    console.log(`New face detected at ${ new Date().toLocaleString()}`);
+                }
+              
+            }
+        }
+       
+        async function startWebcam() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+               video.onloadedmetadata = () => {
+                   video.play();
+                  detectAndAnalyze(video);
+                }
+               
+            } catch (error) {
+                console.error("Error accessing webcam:", error);
+            }
+        }
+
+        function handleFile(event) {
+               const file = event.target.files[0];
+                if (file) {
+                  video.src = URL.createObjectURL(file);
+                  video.onloadedmetadata = () => {
+                   video.play();
+                  detectAndAnalyze(video);
+                }
+
+                 }
+        }
+
+        async function startRecording() {
+             if (!isRecording) {
+                 recordedChunks = [];
+                const stream = canvas.captureStream(30);
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+                mediaRecorder.ondataavailable = handleDataAvailable;
+                mediaRecorder.start();
+                captureButton.textContent = "Stop Recording";
+                isRecording = true;
+            } else {
+                mediaRecorder.stop();
+                captureButton.textContent = "Start Recording";
+                isRecording = false;
+            }
+        }
+        function handleDataAvailable(event){
+            if (event.data && event.data.size >0 ) {
+               recordedChunks.push(event.data);
+                downloadVideo();
+            }
+        }
+         function downloadVideo() {
+                const blob = new Blob(recordedChunks, { type: "video/webm" });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'captured.webm';
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                recordedChunks = [];
+        }
+    
+        webcamButton.addEventListener('click', startWebcam);
+        fileInput.addEventListener('change', handleFile);
+        captureButton.addEventListener('click', startRecording);
+    </script>
+</body>
+</html>
