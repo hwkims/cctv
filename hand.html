@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hand Gesture Number Recognition</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+            color: #333;
+        }
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 20px;
+            text-align: center;
+            color: #2c3e50;
+        }
+        #video-container {
+            position: relative;
+            border: 2px solid #3498db;
+            border-radius: 10px;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        #canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+        }
+        #video {
+            display: block;
+            width: 100%;
+            height: auto;
+            max-width: 640px;
+            max-height: 480px;
+        }
+        #controls {
+            margin-top: 20px;
+            text-align: center;
+             display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .control-button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            background-color: #3498db;
+            color: #fff;
+            border: none;
+            border-radius: 5px;
+            font-size: 1em;
+            transition: background-color 0.3s ease;
+        }
+        .control-button:hover {
+            background-color: #2980b9;
+        }
+        input[type="file"] {
+            color: #fff;
+            background-color: #3498db;
+            font-size: 1em;
+        }
+        input[type="file"]::file-selector-button {
+            color: #fff;
+            background-color: #2980b9;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            transition: background-color 0.3s ease;
+        }
+        input[type="file"]::file-selector-button:hover {
+            background-color: #1f6791;
+        }
+        #numberDisplay {
+            margin-top: 20px;
+            font-size: 3em;
+            font-weight: bold;
+            text-align: center;
+        }
+        @media (max-width: 768px) {
+            #video {
+                width: 100%;
+                height: auto;
+            }
+            .control-button, input[type="file"] {
+                padding: 8px 16px;
+                font-size: 0.9em;
+            }
+            h1 {
+                font-size: 2em;
+            }
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/hand-pose-detection"></script>
+</head>
+<body>
+    <h1>Hand Gesture Number Recognition</h1>
+    <div id="video-container">
+        <video id="video" autoplay muted></video>
+        <canvas id="canvas" width="640" height="480"></canvas>
+    </div>
+    <div id="controls">
+        <button id="webcamButton" class="control-button">Start Webcam</button>
+        <span> 또는 </span>
+        <input type="file" id="fileInput" accept="video/*">
+    </div>
+     <div id="numberDisplay"></div>
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const webcamButton = document.getElementById('webcamButton');
+        const fileInput = document.getElementById('fileInput');
+        const numberDisplay = document.getElementById('numberDisplay');
+         let handModel;
+        let fingerTipIds = [8,12,16,20];
+        let fingerPipIds = [6,10,14,18];
+
+        async function loadModels() {
+           try {
+                 handModel = await handPoseDetection.createDetector(handPoseDetection.SupportedModels.MediaPipeHands, {
+                     runtime: 'tfjs',
+                      modelType: 'lite'
+                });
+                  console.log("Hand Model Loaded:", handModel);
+           } catch (error) {
+              console.error("Error loading models:", error);
+              numberDisplay.textContent = "Error loading hand model.";
+               numberDisplay.style.color="red";
+          }
+       }
+       loadModels();
+
+      function recognizeNumber(handKeypoints) {
+        if (!handKeypoints) {
+            return null;
+        }
+         let fingerStatus = [];
+        for(let i =0; i < fingerTipIds.length; i++) {
+           let tip = handKeypoints[fingerTipIds[i]];
+           let pip = handKeypoints[fingerPipIds[i]];
+           if (tip && pip) {
+              fingerStatus.push(tip.y < pip.y);
+           }
+        }
+         return fingerStatus.filter(x => x).length;
+     }
+        async function detectAndAnalyze(currentVideo) {
+              if (handModel) {
+                 try {
+                  ctx.clearRect(0, 0, canvas.width, canvas.height);
+                  const hands = await handModel.estimateHands(currentVideo, { flipHorizontal: true });
+                   if (hands && hands.length > 0) {
+                       for (const hand of hands) {
+                         drawKeypoints(hand.keypoints);
+                           const number = recognizeNumber(hand.keypoints);
+                            if(number !== null) {
+                               numberDisplay.textContent = number;
+                            } else {
+                                numberDisplay.textContent = "";
+                            }
+                       }
+                    }
+                  } catch (error) {
+                     console.error("Error detecting and analyzing:", error);
+                      numberDisplay.textContent = "Error during analysis.";
+                     numberDisplay.style.color="red";
+                   }
+              } else {
+               console.log("Waiting for hand models to load...");
+              }
+           requestAnimationFrame(() => detectAndAnalyze(currentVideo));
+        }
+
+        function drawKeypoints(keypoints) {
+           ctx.fillStyle = "white";
+            for (const keypoint of keypoints) {
+               if (keypoint.score > 0.5) {
+                  ctx.beginPath();
+                   ctx.arc(keypoint.x, keypoint.y, 5, 0, 2 * Math.PI);
+                   ctx.fill();
+               }
+            }
+       }
+        async function startWebcam() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                     canvas.width = video.videoWidth;
+                     canvas.height = video.videoHeight;
+                    video.play();
+                   detectAndAnalyze(video);
+                };
+            } catch (error) {
+                console.error("Error accessing webcam:", error);
+               numberDisplay.textContent = "Error accessing webcam.";
+               numberDisplay.style.color="red";
+            }
+        }
+
+        function handleFile(event) {
+            const file = event.target.files[0];
+            if (file) {
+               video.src = URL.createObjectURL(file);
+                video.onloadedmetadata = () => {
+                    canvas.width = video.videoWidth;
+                     canvas.height = video.videoHeight;
+                     video.play();
+                     detectAndAnalyze(video);
+                };
+            }
+        }
+
+        webcamButton.addEventListener('click', startWebcam);
+        fileInput.addEventListener('change', handleFile);
+       // Start webcam on initial load
+       startWebcam();
+    </script>
+</body>
+</html>
