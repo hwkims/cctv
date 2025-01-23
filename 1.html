@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web-Based Intruder Detection</title>
+    <style>
+         body {
+             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+             display: flex;
+             flex-direction: column;
+            align-items: center;
+             justify-content: center;
+             min-height: 100vh;
+             margin: 0;
+             background-color: #f0f0f0;
+             color: #333;
+         }
+         h1 {
+             font-size: 2.5em;
+            margin-bottom: 20px;
+             text-align: center;
+             color: #2c3e50;
+         }
+        #video-container {
+             position: relative;
+             border: 2px solid #3498db;
+             border-radius: 10px;
+             box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            margin-bottom:20px;
+            overflow:hidden;
+             display:flex;
+             align-items:center;
+            justify-content:center;
+         }
+        #canvas {
+            position: absolute;
+             top:0;
+             left:0;
+            pointer-events:none;
+         }
+         #video {
+            display: block;
+            width: 100%;
+             height: auto;
+             max-width: 640px;
+            max-height: 480px;
+         }
+
+        #controls {
+             margin-top: 20px;
+             text-align: center;
+            display: flex;
+            flex-direction: column;
+             align-items:center;
+            justify-content:center;
+         }
+
+        .control-button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+             background-color: #3498db;
+            color: #fff;
+            border: none;
+             border-radius: 5px;
+             font-size:1em;
+             transition: background-color 0.3s ease;
+         }
+          .control-button:hover {
+             background-color: #2980b9;
+         }
+
+        input[type="file"] {
+              color:#fff;
+              background-color: #3498db;
+             font-size:1em;
+         }
+         input[type="file"]::file-selector-button {
+             color: #fff;
+             background-color: #2980b9;
+             border:none;
+            padding:10px 20px;
+            border-radius:5px;
+            transition: background-color 0.3s ease;
+        }
+        input[type="file"]::file-selector-button:hover {
+             background-color: #1f6791;
+         }
+         #message {
+             margin-top: 10px;
+            text-align: center;
+             font-weight: bold;
+         }
+         #captureButton {
+             display: block;
+             margin: 20px auto;
+             padding: 10px 20px;
+            cursor: pointer;
+            background-color: #e74c3c;
+             color: #fff;
+             border: none;
+             border-radius: 5px;
+            font-size:1em;
+            transition: background-color 0.3s ease;
+         }
+         #captureButton:hover {
+            background-color: #c0392b;
+         }
+         #recordingIndicator {
+            margin-top: 5px;
+             color: red;
+             font-weight: bold;
+             display: none;
+        }
+         .slider-container {
+            display: flex;
+             align-items: center;
+            margin: 10px 0;
+         }
+
+         .slider-label {
+            margin-right: 10px;
+             min-width: 150px;
+            text-align: left;
+        }
+
+         input[type="range"] {
+            width: 200px;
+            margin-right:10px;
+         }
+
+        .slider-value {
+            font-weight: bold;
+         }
+         @media (max-width: 768px) {
+               #video {
+                 width: 100%;
+                 height: auto;
+               }
+            .control-button, input[type="file"] {
+              padding: 8px 16px;
+             font-size:0.9em;
+            }
+            h1 {
+               font-size:2em;
+             }
+               .slider-container {
+                 flex-direction: column;
+                 align-items:flex-start;
+              }
+             .slider-label {
+               margin-bottom: 5px;
+             }
+            input[type="range"] {
+                  width: 100%;
+              }
+         }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+</head>
+<body>
+    <h1>Real-time Intruder Detection System</h1>
+    <div id="video-container">
+        <video id="video" autoplay muted></video>
+        <canvas id="canvas" width="640" height="480"></canvas>
+    </div>
+
+    <div id="controls">
+        <button id="webcamButton" class="control-button">Start Webcam</button>
+        <span> 또는 </span>
+        <input type="file" id="fileInput" accept="video/*">
+
+        <div class="slider-container">
+            <label for="angleThreshold" class="slider-label">Angle Change Threshold:</label>
+            <input type="range" id="angleThreshold" min="5" max="45" value="15">
+            <span id="angleValue" class="slider-value">15</span>
+        </div>
+        <button id="analyzeButton" class="control-button">Analyze Angles</button>
+        <button id="captureButton" class="control-button">Start Recording</button>
+        <div id="recordingIndicator">Recording...</div>
+    </div>
+    <div id="message"></div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const webcamButton = document.getElementById('webcamButton');
+        const fileInput = document.getElementById('fileInput');
+        const captureButton = document.getElementById('captureButton');
+        const messageDiv = document.getElementById('message');
+        const recordingIndicator = document.getElementById('recordingIndicator');
+         const analyzeButton = document.getElementById('analyzeButton');
+
+        const angleThresholdSlider = document.getElementById('angleThreshold');
+        const angleValueDisplay = document.getElementById('angleValue');
+
+        let poseModel;
+        let prevKeypoints = null;
+        let prevAngles = {};
+        const movementThreshold = 20;
+        let angleChangeThreshold = 15;
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let isRecording = false;
+        let captureCount = 0;
+
+         const jointPairs = {
+            "leftArm": [5, 7, 9],
+            "rightArm": [6, 8, 10],
+            "leftLeg": [11, 13, 15],
+            "rightLeg": [12, 14, 16],
+            "torso": [5, 6, 12],
+            "neck": [5, 6, 0],
+            "leftHip": [5, 11, 13],
+           "rightHip": [6, 12, 14]
+        };
+         const geminiApiKey = 'YOUR_GEMINI_API_KEY'; // 여기에 Gemini API 키를 넣으세요
+         let analysisResults = null;
+
+        angleThresholdSlider.addEventListener('input', function() {
+            angleChangeThreshold = parseInt(this.value);
+           angleValueDisplay.textContent = this.value;
+        });
+
+        async function loadModels() {
+           try {
+                poseModel = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
+                     modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING
+                });
+                console.log("Pose Model Loaded:", poseModel);
+            } catch (error) {
+                console.error("Error loading models:", error);
+                messageDiv.textContent = "Error loading detection models.";
+                messageDiv.style.color = "red";
+            }
+        }
+        loadModels();
+
+       function calculateAngle(a, b, c) {
+           if (!a || !b || !c) {
+                 return 0;
+            }
+             const aPos = { x: a.x, y: a.y };
+            const bPos = { x: b.x, y: b.y };
+             const cPos = { x: c.x, y: c.y };
+            const radians = Math.atan2(cPos.y - bPos.y, cPos.x - bPos.x) - Math.atan2(aPos.y - bPos.y, aPos.x - bPos.x);
+            let angle = Math.abs(radians * 180.0 / Math.PI);
+             if (angle > 180.0) {
+                angle = 360 - angle;
+           }
+           return angle;
+        }
+
+        async function detectAndAnalyze(currentVideo) {
+            if (poseModel) {
+                try {
+                   ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    const poses = await poseModel.estimatePoses(currentVideo, { flipHorizontal: true });
+                   if (poses && poses.length > 0) {
+                         const pose = poses[0];
+                        drawKeypoints(pose.keypoints);
+                         detectMovement(pose.keypoints);
+                        detectSuspiciousBehavior(pose.keypoints);
+                   }
+                } catch (error) {
+                   console.error("Error detecting and analyzing:", error);
+                    setMessage("Error during analysis.", "red");
+                }
+           } else {
+               console.log("Waiting for models to load...");
+            }
+            requestAnimationFrame(() => detectAndAnalyze(currentVideo));
+        }
+
+        function drawKeypoints(keypoints) {
+             ctx.fillStyle = "white";
+            for (const keypoint of keypoints) {
+                if (keypoint.score > 0.5) {
+                    ctx.beginPath();
+                    ctx.arc(keypoint.x, keypoint.y, 5, 0, 2 * Math.PI);
+                   ctx.fill();
+                }
+            }
+        }
+
+       function detectMovement(keypoints) {
+             if (prevKeypoints) {
+                 let totalMovement = 0;
+                for (let i = 0; i < keypoints.length; i++) {
+                   const prevKeypoint = prevKeypoints[i];
+                     const keypoint = keypoints[i];
+                    if (prevKeypoint && keypoint && prevKeypoint.score > 0.5 && keypoint.score > 0.5) {
+                        totalMovement += Math.sqrt(Math.pow(keypoint.x - prevKeypoint.x, 2) + Math.pow(keypoint.y - prevKeypoint.y, 2));
+                   }
+                }
+               if (totalMovement * canvas.width > movementThreshold) {
+                     setMessage("Movement Detected!", "red");
+                    console.log(`Total movement: ${(totalMovement * canvas.width).toFixed(2)}`);
+                    captureCanvas("movement");
+                 }
+            }
+             prevKeypoints = keypoints;
+         }
+
+        function detectSuspiciousBehavior(keypoints) {
+             for (const [jointName, jointIndices] of Object.entries(jointPairs)) {
+                const [aIndex, bIndex, cIndex] = jointIndices;
+                const a = keypoints[aIndex];
+                 const b = keypoints[bIndex];
+                 const c = keypoints[cIndex];
+
+                if (a && b && c && a.score > 0.5 && b.score > 0.5 && c.score > 0.5) {
+                     const newAngle = calculateAngle(a, b, c);
+
+                     if (prevAngles[jointName] !== undefined && Math.abs(newAngle - prevAngles[jointName]) > angleChangeThreshold) {
+                         setMessage(`Suspicious ${jointName} movement detected`, "orange");
+                        console.log(`Suspicious ${jointName} movement detected`);
+                        captureCanvas(`suspicious_${jointName}`);
+                   }
+                    prevAngles[jointName] = newAngle;
+                }
+            }
+         }
+         async function analyzeAngles() {
+            if (!poseModel) {
+               setMessage("Pose model not loaded yet!", "red");
+                 return;
+           }
+             try {
+              const currentVideo = video.srcObject || video;
+                const poses = await poseModel.estimatePoses(currentVideo, { flipHorizontal: true });
+                if (poses && poses.length > 0) {
+                    const keypoints = poses[0].keypoints;
+                    const currentAngles = {};
+                     for (const [jointName, jointIndices] of Object.entries(jointPairs)) {
+                        const [aIndex, bIndex, cIndex] = jointIndices;
+                       const a = keypoints[aIndex];
+                         const b = keypoints[bIndex];
+                        const c = keypoints[cIndex];
+
+                        if (a && b && c && a.score > 0.5 && b.score > 0.5 && c.score > 0.5) {
+                           currentAngles[jointName] = calculateAngle(a, b, c);
+                       }
+                    }
+                    const prompt = "Analyze these angles for suspicious behavior. " + JSON.stringify(currentAngles) +
+                    "Give advice for threshold change from 5 to 45. Give in JSON format key as 'jointName', value as number 5 to 45";
+
+                    analysisResults = await callGeminiApi(prompt);
+                  if (analysisResults) {
+                        setMessage(`Analysis Complete. Check console for dynamic threshold recommendations.`, "green");
+                         console.log("Gemini API Results:", analysisResults);
+                           // 동적으로 임계값 조절
+                       setDynamicThresholds(analysisResults);
+                     } else {
+                         setMessage("Gemini API analysis failed.", "red");
+                    }
+               } else {
+                   setMessage("No pose detected. Cannot analyze angles.", "red");
+                }
+           } catch (error) {
+                 console.error("Error during angle analysis:", error);
+                setMessage("Error during angle analysis.", "red");
+             }
+        }
+
+        function setDynamicThresholds(analysis) {
+          if(analysis) {
+          try {
+            const thresholds = JSON.parse(analysis);
+            for (const [jointName, threshold] of Object.entries(thresholds)) {
+               if(jointPairs[jointName] ) {
+                   // Adjust the threshold based on Gemini API results
+                    angleChangeThreshold = threshold;
+                   angleThresholdSlider.value = threshold;
+                  angleValueDisplay.textContent = threshold;
+                  console.log(`Adjusting ${jointName} threshold to: ${threshold}`);
+                }
+              }
+              setMessage("Dynamic thresholds are adjusted", "green")
+           }
+          catch(error) {
+                setMessage("Dynamic threshold adjustment failed", "red")
+          }
+         }
+         }
+
+
+        async function callGeminiApi(prompt) {
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`;
+
+             const requestBody = {
+                contents: [{ parts: [{ text: prompt }] }],
+            };
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                     headers: { 'Content-Type': 'application/json' },
+                     body: JSON.stringify(requestBody),
+                 });
+                if (!response.ok) {
+                     console.error('API request failed:', response.status, response.statusText);
+                    return null;
+                 }
+                 const data = await response.json();
+                  return data.candidates[0].content.parts[0].text;
+            } catch (error) {
+                 console.error('Error calling Gemini API:', error);
+                return null;
+            }
+         }
+
+
+
+        async function startWebcam() {
+            try {
+                 const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                video.onloadedmetadata = () => {
+                     canvas.width = video.videoWidth;
+                     canvas.height = video.videoHeight;
+                    video.play();
+                    detectAndAnalyze(video);
+                };
+            } catch (error) {
+                console.error("Error accessing webcam:", error);
+               setMessage("Error accessing webcam.", "red");
+             }
+        }
+
+        function handleFile(event) {
+             const file = event.target.files[0];
+             if (file) {
+                 video.src = URL.createObjectURL(file);
+                 video.onloadedmetadata = () => {
+                     canvas.width = video.videoWidth;
+                     canvas.height = video.videoHeight;
+                     video.play();
+                    detectAndAnalyze(video);
+                 };
+             }
+         }
+
+        function startRecording() {
+             if (!isRecording) {
+                 recordedChunks = [];
+                const stream = canvas.captureStream();
+                 mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
+                mediaRecorder.ondataavailable = handleDataAvailable;
+                mediaRecorder.onstop = downloadVideo;
+                 mediaRecorder.start();
+               captureButton.textContent = "Stop Recording";
+                 recordingIndicator.style.display = 'block';
+                isRecording = true;
+            } else {
+                mediaRecorder.stop();
+                 captureButton.textContent = "Start Recording";
+                recordingIndicator.style.display = 'none';
+                isRecording = false;
+            }
+        }
+
+        function handleDataAvailable(event) {
+             if (event.data && event.data.size > 0) {
+                 recordedChunks.push(event.data);
+            }
+         }
+
+       function downloadVideo() {
+            if (recordedChunks.length === 0) return;
+           const blob = new Blob(recordedChunks, { type: "video/webm" });
+             const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+             a.href = url;
+            a.download = 'captured.webm';
+           a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+             URL.revokeObjectURL(url);
+             recordedChunks = [];
+        }
+
+         function captureCanvas(type) {
+            const image = canvas.toDataURL("image/png");
+            const a = document.createElement('a');
+           a.href = image;
+             a.download = `captured_${type}_${captureCount}.png`;
+            a.style.display = 'none';
+             document.body.appendChild(a);
+            a.click();
+           document.body.removeChild(a);
+           captureCount++;
+        }
+
+        function setMessage(text, color) {
+            messageDiv.textContent = text;
+             messageDiv.style.color = color;
+        }
+         webcamButton.addEventListener('click', startWebcam);
+         fileInput.addEventListener('change', handleFile);
+        captureButton.addEventListener('click', startRecording);
+         analyzeButton.addEventListener('click', analyzeAngles);
+
+         // Start webcam on initial load
+         startWebcam();
+    </script>
+</body>
+</html>
